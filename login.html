@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in — Steal Scout</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 24'%3E%3Cpath d='M2 2h18l10 10-10 10H2z' fill='%23ffce3a' stroke='%2313233f' stroke-width='2.5' stroke-linejoin='round'/%3E%3Ccircle cx='8' cy='12' r='2.5' fill='%2313233f'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .login article { max-width: 520px; }
+    .login form { display: grid; gap: 12px; margin-top: 8px; }
+    .login label { font-weight: 600; }
+    .login input[type="email"] {
+      font: inherit; font-size: 1.05rem; padding: 14px 16px;
+      border: 2px solid var(--ink); border-radius: 12px; background: var(--paper);
+    }
+    .login .btn { justify-self: start; }
+    .msg { border-radius: 10px; padding: 12px 14px; font-weight: 600; margin: 0 0 18px; }
+    .msg.err { background: #fde7e4; color: #a32a1e; }
+    .msg.ok { background: #e1f3ea; color: var(--save); }
+    .alt { margin-top: 24px; color: var(--ink-soft); }
+  </style>
+</head>
+<body>
+<header class="site-head">
+  <div class="wrap">
+    <a class="logo" href="/"><span class="logo-tag" aria-hidden="true"></span>Steal Scout</a>
+  </div>
+</header>
+
+<main class="legal login">
+  <div class="wrap">
+    <article>
+      <h1>Log in</h1>
+      <p class="updated">Enter the email you used to join. We'll send you a one-click login link.</p>
+      <p class="msg err" id="err" hidden></p>
+      <p class="msg ok" id="ok" hidden></p>
+      <form id="form" novalidate>
+        <label for="email">Email address</label>
+        <input id="email" type="email" name="email" autocomplete="email" required placeholder="you@example.com">
+        <button class="btn" type="submit" id="send">Email me a login link</button>
+      </form>
+      <p class="alt">Not a member yet? <a href="/#founding">Join for $0 today</a></p>
+    </article>
+  </div>
+</main>
+
+<script>
+(function () {
+  var errEl = document.getElementById('err');
+  var okEl = document.getElementById('ok');
+  var form = document.getElementById('form');
+  var emailEl = document.getElementById('email');
+  var send = document.getElementById('send');
+
+  var reasons = {
+    checkout: 'We couldn’t confirm your checkout yet. If you just joined, enter your email below and we’ll send you a login link.',
+    expired: 'That login link has expired. Enter your email for a new one.',
+    inactive: 'That membership isn’t active anymore. You can rejoin from the home page.',
+    server: 'Something went wrong on our end. Try again in a minute.'
+  };
+  var e = new URLSearchParams(location.search).get('e');
+  if (reasons[e]) { errEl.textContent = reasons[e]; errEl.hidden = false; }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    errEl.hidden = true; okEl.hidden = true;
+    var email = emailEl.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errEl.textContent = 'Enter a valid email address, like you@example.com.'; errEl.hidden = false; emailEl.focus(); return;
+    }
+    send.disabled = true; send.textContent = 'Sending…';
+    fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: email }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok) throw new Error(x.d.error || 'Couldn’t send a login link.');
+        okEl.textContent = x.d.message; okEl.hidden = false;
+        send.textContent = 'Send another link';
+      })
+      .catch(function (err) {
+        errEl.textContent = err.message === 'Failed to fetch' ? 'Check your connection and try again.' : err.message;
+        errEl.hidden = false;
+        send.textContent = 'Email me a login link';
+      })
+      .finally(function () { send.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

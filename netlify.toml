@@ -10,3 +10,10 @@
   for = "/search.html"
   [headers.values]
     X-Robots-Tag = "noindex"
+
+# Setup notes are for you, not visitors
+[[redirects]]
+  from = "/SETUP.md"
+  to = "/404.html"
+  status = 404
+  force = true

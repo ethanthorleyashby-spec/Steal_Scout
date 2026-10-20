@@ -16,6 +16,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -59,6 +60,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
   background: var(--ink); transform: translateY(-50%);
 }
 .head-link { font-weight: 600; font-size: 0.95rem; }
+.head-nav { display: flex; gap: 20px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 480px) { .head-nav .head-link:first-child { display: none; } }
 
 /* Buttons */
 .btn {

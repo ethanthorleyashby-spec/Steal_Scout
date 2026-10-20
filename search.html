@@ -59,7 +59,14 @@
     .p a { display: block; margin-top: 6px; font-size: 0.86rem; font-weight: 600; }
     .state { text-align: center; padding: 48px 16px; color: var(--ink-soft); }
     .state strong { display: block; font-family: var(--display); font-size: 1.3rem; color: var(--ink); margin-bottom: 6px; }
+    .acct { display: flex; gap: 14px; align-items: center; font-size: 0.92rem; color: var(--ink-soft); }
+    .acct button { font: inherit; font-weight: 600; color: var(--ink); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 0; }
+    .acct a { font-weight: 600; }
+    .welcome { background: #e1f3ea; color: var(--save); border-radius: 12px; padding: 12px 16px; font-weight: 600; margin-bottom: 16px; }
+    .state .btn { margin-top: 18px; }
+    .state .alt { display: block; margin-top: 12px; font-size: 0.95rem; }
     @media (max-width: 600px) {
+      .acct span { display: none; }
       .item { grid-template-columns: 56px 1fr; }
       .thumb { width: 56px; height: 56px; }
       .p { grid-column: 2; text-align: left; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
@@ -72,6 +79,7 @@
 <header class="site-head">
   <div class="wrap">
     <a class="logo" href="/"><span class="logo-tag" aria-hidden="true"></span>Steal Scout</a>
+    <div class="acct" id="acct"></div>
   </div>
 </header>
 
@@ -87,7 +95,8 @@
       <button type="button" data-q="standing desk at least 55 inches wide under $300">standing desk, 55+ inches, under $300</button>
       <button type="button" data-q="used iphone 13 128gb under $350">used iPhone 13, under $350</button>
     </p>
-    <div class="code-row">
+    <div class="welcome" id="welcome" hidden>Welcome, founding member! You're logged in on this device.</div>
+    <div class="code-row" id="code-row" hidden>
       <label for="code">Access code</label>
       <input id="code" type="password" autocomplete="off">
     </div>
@@ -107,7 +116,14 @@
   var go = document.getElementById('go');
   var demo = new URLSearchParams(location.search).has('demo');
 
+  var params = new URLSearchParams(location.search);
+  var acct = document.getElementById('acct');
+  var member = null;
+
+  // Testers: open search.html?tester once to show the access-code box; the code is remembered on this device.
   try { codeEl.value = localStorage.getItem('ss_code') || ''; } catch (e) {}
+  if (params.has('tester') || codeEl.value) document.getElementById('code-row').hidden = false;
+  if (params.has('welcome')) document.getElementById('welcome').hidden = false;
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -123,6 +139,36 @@
     var s = el('div', 'state');
     s.append(el('strong', null, title), document.createTextNode(body));
     out.append(s);
+  }
+
+  function showLoginPrompt(inactive) {
+    out.replaceChildren();
+    var s = el('div', 'state');
+    s.append(el('strong', null, inactive ? 'Your membership isn\u2019t active.' : 'Log in to start scouting.'));
+    s.append(document.createTextNode(inactive
+      ? 'Rejoin to keep finding the best deals without the ads.'
+      : 'Steal Scout search is for founding members. Already a member? We\u2019ll email you a login link.'));
+    s.append(el('br'));
+    var a = el('a', 'btn', inactive ? 'Rejoin Steal Scout' : 'Log in');
+    a.href = inactive ? '/#founding' : '/login.html';
+    s.append(a);
+    if (!inactive) { var j = el('a', 'alt', 'Not a member yet? Join for $0 today'); j.href = '/#founding'; s.append(j); }
+    out.append(s);
+  }
+
+  function renderAccount() {
+    acct.replaceChildren();
+    if (member) {
+      acct.append(el('span', null, member.email || 'Member'));
+      var b = el('button', null, 'Log out');
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        fetch('/api/logout', { method: 'POST' }).finally(function () { location.href = '/'; });
+      });
+      acct.append(b);
+    } else {
+      var a = el('a', null, 'Log in'); a.href = '/login.html'; acct.append(a);
+    }
   }
 
   function render(data) {
@@ -192,15 +238,17 @@
 
   function search(q) {
     var code = codeEl.value.trim();
-    if (!demo && !code) { codeEl.focus(); showState('Enter the access code first.', 'Search is limited to testers until launch.'); return; }
-    try { localStorage.setItem('ss_code', code); } catch (e) {}
+    if (!demo && !member && !code) { showLoginPrompt(false); return; }
+    if (code) { try { localStorage.setItem('ss_code', code); } catch (e) {} }
     go.disabled = true; go.textContent = 'Scouting…';
     showState('Scouting stores and marketplaces…', 'Removing sponsored results and checking each listing against what you asked for.');
     var req = demo
       ? new Promise(function (res) { setTimeout(function () { res({ ok: true, json: function () { return DEMO; } }); }, 400); })
-      : fetch('/api/search?q=' + encodeURIComponent(q), { headers: { 'x-access-code': code } });
+      : fetch('/api/search?q=' + encodeURIComponent(q), { headers: code ? { 'x-access-code': code } : {}, credentials: 'same-origin' });
     req.then(function (res) {
       return Promise.resolve(res.json()).then(function (data) {
+        if (res.status === 401 && data.reason === 'login') { member = null; renderAccount(); showLoginPrompt(false); return; }
+        if (res.status === 403 && data.reason === 'inactive') { member = null; renderAccount(); showLoginPrompt(true); return; }
         if (!res.ok) throw new Error(data.error || 'Search failed.');
         render(data);
       });
@@ -227,7 +275,18 @@
       { title: 'Compact 4 Quart Air Fryer', price: 49.99, source: 'Department store', rating: 4.4, reviews: 3000, fit: 55, fails: true, notes: ['Wanted 5+ qt, this is 4 qt'], link: 'https://example.com' }
     ]
   };
-  if (demo) { qEl.value = 'air fryer, at least 5 quarts, under $90'; search(qEl.value); }
+  if (demo) { member = { email: 'demo@example.com' }; renderAccount(); qEl.value = 'air fryer, at least 5 quarts, under $90'; search(qEl.value); }
+  else {
+    fetch('/api/me', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { member = d.member ? d : null; })
+      .catch(function () { member = null; })
+      .finally(function () {
+        renderAccount();
+        if (!member && !codeEl.value) showLoginPrompt(false);
+        else if (params.get('q')) { qEl.value = params.get('q'); search(qEl.value); }
+      });
+  }
 })();
 </script>
 </body>
