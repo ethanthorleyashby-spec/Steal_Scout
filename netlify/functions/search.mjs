@@ -71,7 +71,7 @@ export default async (req) => {
   const warnings = [];
   if (!google) warnings.push(isEmpty(g.reason) ? "No store results for this search. Try fewer or simpler words." : `Store results unavailable: ${g.reason?.message || "unknown error"}`);
   if (!ebay && !isEmpty(e.reason)) warnings.push(`eBay results unavailable: ${e.reason?.message || "unknown error"}`);
-  if (!google && !ebay) return json(502, { error: "Couldn't reach the shopping sources. Try again in a minute.", warnings });
+  if (!google && !ebay && !(isEmpty(g.reason) && isEmpty(e.reason))) return json(502, { error: "Couldn't reach the shopping sources. Try again in a minute.", warnings });
 
   const { items, removed: r1 } = normalize(google, ebay);
   const { results, removed: r2 } = rank(plan, items);
