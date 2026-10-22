@@ -56,6 +56,7 @@
     .p { text-align: right; }
     .p strong { font-family: var(--display); font-size: 1.3rem; font-variant-numeric: tabular-nums; }
     .p s { display: block; font-size: 0.82rem; color: var(--ink-soft); }
+    .p .ship { display: block; font-size: 0.8rem; color: var(--ink-soft); }
     .p a { display: block; margin-top: 6px; font-size: 0.86rem; font-weight: 600; }
     .state { text-align: center; padding: 48px 16px; color: var(--ink-soft); }
     .state strong { display: block; font-family: var(--display); font-size: 1.3rem; color: var(--ink); margin-bottom: 6px; }
@@ -71,7 +72,7 @@
       .thumb { width: 56px; height: 56px; }
       .p { grid-column: 2; text-align: left; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
       .p a { margin-top: 0; }
-      .p s { display: inline; margin-left: 6px; }
+      .p s, .p .ship { display: inline; margin-left: 6px; }
     }
   </style>
 </head>
@@ -201,7 +202,7 @@
     var list = el('ol', 'list');
     var topDone = false;
     data.results.forEach(function (it) {
-      var good = !it.fails && it.fit >= 60;
+      var good = !it.fails && !it.flagged && it.fit >= 60;
       var li = el('li', 'item' + (good && !topDone ? ' top' : '') + (good ? '' : ' weak'));
       var img = el('img', 'thumb');
       var src = it.thumbnail && safeUrl(it.thumbnail);
@@ -216,7 +217,7 @@
       mid.append(t);
       var meta = [it.source];
       if (it.rating != null) meta.push(it.rating + '★' + (it.reviews ? ' from ' + Number(it.reviews).toLocaleString() + ' reviews' : ''));
-      if (it.delivery) meta.push(it.delivery);
+      if (it.delivery && !(it.shipping > 0)) meta.push(it.delivery);
       mid.append(el('div', 'm', meta.join(' · ')));
       var badges = el('div', 'badges');
       if (good && !topDone) { badges.append(el('span', 'b b-top', 'Top pick')); topDone = true; }
@@ -227,8 +228,10 @@
       li.append(mid);
 
       var p = el('div', 'p');
-      p.append(el('strong', null, money(it.price)));
-      if (it.oldPrice && it.oldPrice > it.price) p.append(el('s', null, money(it.oldPrice)));
+      var total = it.total != null ? it.total : it.price;
+      p.append(el('strong', null, money(total)));
+      if (it.shipping > 0) p.append(el('span', 'ship', money(it.price) + ' + ' + money(it.shipping) + ' delivery'));
+      else if (it.oldPrice && it.oldPrice > it.price) p.append(el('s', null, money(it.oldPrice)));
       if (href) { var v = el('a', null, 'View at ' + it.source); v.href = href; v.target = '_blank'; v.rel = 'noopener nofollow'; p.append(v); }
       li.append(p);
       list.append(li);

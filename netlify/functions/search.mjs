@@ -5,7 +5,7 @@
 //   SERPAPI_KEY  - your SerpApi key (never put it in the website code)
 //   ACCESS_CODE  - optional tester password
 //   STRIPE_SECRET_KEY, SESSION_SECRET - for member logins (see SETUP.md)
-import { parseQuery, normalize, rank, firstNormalResult } from "../lib/rank.mjs";
+import { parseQuery, normalize, rank, firstNormalResult, topPick } from "../lib/rank.mjs";
 import { authorize } from "../lib/auth.mjs";
 import { json as jsonWithCookie } from "../lib/session.mjs";
 
@@ -47,7 +47,8 @@ export default async (req) => {
   const gParams = { engine: "google_shopping", q: query, gl: "us", hl: "en" };
   if (plan.maxPrice != null) gParams.max_price = String(plan.maxPrice);
   if (plan.minPrice != null) gParams.min_price = String(plan.minPrice);
-  const eParams = { engine: "ebay", _nkw: query, ebay_domain: "ebay.com" };
+  // Buy It Now only (auction bids aren't real prices) and US sellers only (no overseas currency/shipping)
+  const eParams = { engine: "ebay", _nkw: query, ebay_domain: "ebay.com", buying_format: "BIN", LH_PrefLoc: "Domestic" };
   if (plan.maxPrice != null) eParams._udhi = String(plan.maxPrice);
   if (plan.minPrice != null) eParams._udlo = String(plan.minPrice);
   if (plan.condition === "new") eParams.LH_ItemCondition = "1000";
@@ -76,7 +77,7 @@ export default async (req) => {
   const { items, removed: r1 } = normalize(google, ebay);
   const { results, removed: r2 } = rank(plan, items);
   const first = firstNormalResult(google);
-  const best = results.find((x) => !x.fails && x.fit >= 60) || null;
+  const best = topPick(results);
 
   return json(200, {
     plan,
@@ -84,7 +85,7 @@ export default async (req) => {
     totalFound: items.length + r1.sponsored,
     removed: { sponsored: r1.sponsored, ...r2 },
     firstResult: first,
-    savings: first && best && first.price > best.price ? Math.round((first.price - best.price) * 100) / 100 : null,
+    savings: first && best && first.price > best.total ? Math.round((first.price - best.total) * 100) / 100 : null,
     marketplaceUrl: `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(plan.searchText)}`,
     warnings,
   });
