@@ -27,7 +27,7 @@ const UNIT_PATTERN = [...UNIT_LOOKUP.keys()]
   .join("|");
 
 const STOPWORDS = new Set(
-  "a an and the for with of to in on at by or is it its my me i we our that this be need want looking find best good cheap cheapest under below less than max maximum min minimum at least most around about up no more over budget price dollars dollar size new used please some any one wide tall long deep high".split(" ")
+  "a an and the for with of to in on at by or is it its my me i we our that this be need want looking find best good cheap cheapest under below less than max maximum min minimum at least most around about up no more over budget price dollars dollar size new used please some any one wide tall long deep high able can could that which easy easily should must also really very kind type style".split(" ")
 );
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -79,12 +79,21 @@ export function parseQuery(input) {
   else if (/\b(used|pre-?owned|second ?hand|refurbished)\b/i.test(text)) plan.condition = "used-ok";
   text = text.replace(/\b(brand new|new only|only new|no used)\b/gi, " ");
 
+  // Feature phrases are wishes about the item, not words to search for. Keep them as soft features.
+  plan.features = [];
+  const FEATURE_RE = /(?:,|\s)\s*(?:(?:that|which)\s+(?:is|are|can|will|has|have)?\s*|(?:is|are|be)\s+|(?:must|should)\s+(?:be\s+|have\s+)?|(?:able|easy)\s+to\s+(?:be\s+)?|can\s+(?:be\s+)?|with\s+(?:a\s+|an\s+)?)([a-z][a-z\s-]{2,40}?)(?=,|;|\.|$|\s+(?:and|under|below|less|max|for|that|which|with)\b)/gi;
+  text = text.replace(FEATURE_RE, (whole, feat) => {
+    plan.features.push(feat.trim().toLowerCase());
+    return " ";
+  });
+
   plan.searchText = text
     .replace(/\b(at least|at most|minimum|maximum|or more|or less|i need|i want|looking for|find me)\b/gi, " ")
     .replace(/[,;]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
+  plan.keywordsAll = null;
   plan.keywords = [
     ...new Set(
       plan.searchText
@@ -94,6 +103,10 @@ export function parseQuery(input) {
         .filter((w) => (/^\d+$/.test(w) ? !plan.constraints.some((c) => String(c.value) === w) : w.length > 1))
     ),
   ];
+  // The head noun is the thing itself: "kitchen round table" -> table, "air fryer" -> fryer.
+  const words = plan.keywords.filter((w) => !/^\d+$/.test(w));
+  plan.head = words.length ? words[words.length - 1] : null;
+  plan.coreQuery = plan.keywords.join(" ");
   return plan;
 }
 
@@ -108,7 +121,22 @@ export function numbersWithUnit(title, unit) {
   return out;
 }
 
-const ACCESSORY_RE = /\b(liners?|case|cases|cover|covers|replacement|parts?|accessor(?:y|ies)|filters?|cables?|chargers?|adapters?|screen protectors?|protectors?|mounts?|skins?|stickers?|decals?|manuals?|refills?|pads?|lids?|knobs?|bags?|sleeves?|straps?|bands?)\b/i;
+// Toys and miniatures match the words of almost any furniture or appliance search.
+const TOY_RE = /\b(doll(?:house)?s?|barbie|miniatures?|mini figures?|diorama|figurines?|toys?|play ?sets?|pretend play|\d+\s*[:/]\s*\d+\s*scale|scale model|model kit|keychains?|ornaments?|magnets?|costumes?)\b/i;
+
+const FURNITURE = new Set("table desk chair sofa couch bed dresser shelf shelve bookcase cabinet stool bench nightstand wardrobe ottoman".split(" "));
+
+// Ways a listing might say it has a feature the shopper asked for.
+const FEATURE_SYNONYMS = {
+  disassemble: ["detachable", "removable", "folding", "foldable", "collapsible", "knock down", "easy assembly", "disassemble"],
+  fold: ["folding", "foldable", "collapsible", "fold"],
+  wireless: ["wireless", "bluetooth", "cordless"],
+  waterproof: ["waterproof", "water resistant", "ip67", "ip68"],
+  quiet: ["quiet", "silent", "low noise"],
+  adjustable: ["adjustable", "height adjustable", "extendable"],
+};
+
+const ACCESSORY_RE = /\b(liners?|case|cases|cover|covers|replacement|parts?|accessor(?:y|ies)|filters?|cables?|chargers?|adapters?|screen protectors?|protectors?|mounts?|skins?|stickers?|decals?|manuals?|refills?|pads?|lids?|knobs?|bags?|sleeves?|straps?|bands?|placemats?|place mats?|mats?|tablecloths?|table cloths?|runners?|toppers?|coasters?|centerpieces?|legs?|hardware|screws?|brackets?|casters?|wheels?|cushions?|slipcovers?|protectors?|posters?|prints?|wall art|stencils?|templates?|patterns?|plans?|blueprints?)\b/i;
 
 const USED_RE = /\b(used|pre-?owned|refurbished|renewed|open box|open-box|second ?hand)\b/i;
 
@@ -219,11 +247,54 @@ export function rank(plan, items) {
 
     // Accessories ("liners for air fryer", "case for iPhone") look like matches but aren't the item.
     // Only penalize when the shopper didn't ask for that accessory (someone searching "iphone case" wants cases).
-    const accWord = (it.title.match(ACCESSORY_RE)?.[1] || "").toLowerCase();
+    // An accessory word only means "accessory" when it comes before the item ("Placemats for Kitchen Table")
+    // or right after it ("Table Cloth"). "Folding Table with Detachable Legs" is still a table.
+    const accMatch = it.title.match(ACCESSORY_RE);
+    const accWord = (accMatch?.[1] || "").toLowerCase();
     const askedFor = accWord && plan.keywords.some((k) => stem(k) === stem(accWord.split(" ").pop()));
-    if (accWord && !askedFor) {
+    let accessory = !!accWord && !askedFor;
+    if (accessory && plan.head) {
+      const tw = it.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const headAt = tw.findIndex((w) => stem(w) === stem(plan.head));
+      const accAt = tw.findIndex((w) => stem(w) === stem(accWord.split(" ").pop()));
+      const before = tw[accAt - 1] || "";
+      const describesItem = /^(detachable|removable|adjustable|folding|foldable|metal|steel|wood|wooden|solid|sturdy|with|and|locking|iron|chrome|heavy|duty|non|slip|anti|built|in)$/.test(before);
+      const isTheProduct = accAt < headAt || accAt === headAt + 1 || accAt >= tw.length - 3;
+      if (headAt > -1 && (describesItem || !isTheProduct)) accessory = false;
+    }
+    if (accessory) {
       fit *= 0.45;
       notes.push("Looks like an accessory, not the item");
+    }
+    const toyWord = (it.title.match(TOY_RE)?.[1] || "").toLowerCase();
+    const askedToy = toyWord && plan.keywords.some((k) => stem(k) === stem(toyWord.split(" ").pop()));
+    if (toyWord && !askedToy) {
+      fit *= 0.25;
+      notes.push("Looks like a toy or miniature, not the real thing");
+    }
+    // Furniture listed at a few inches is a miniature
+    if (FURNITURE.has(stem(plan.head || "")) && !toyWord) {
+      const inches = numbersWithUnit(it.title, "in");
+      if (inches.length && Math.max(...inches) < 10) {
+        fit *= 0.3;
+        notes.push(`Only ${Math.max(...inches)} in, looks like a miniature`);
+      }
+    }
+    // Must contain the head noun ("table") to be the item at all
+    if (plan.head && !titleWords.has(stem(plan.head))) fit *= 0.7;
+
+    // Soft features: small bonus when mentioned, no penalty when the title doesn't say
+    if (plan.features?.length) {
+      const t = it.title.toLowerCase();
+      const hits = plan.features.filter((f) => {
+        const words = f.split(/\s+/).filter((w) => w.length > 3);
+        return words.some((w) => {
+          const key = Object.keys(FEATURE_SYNONYMS).find((k) => w.startsWith(k.slice(0, 5)) || w.replace(/s+/, "s").startsWith(k.replace(/s+/, "s").slice(0, 5)));
+          const alts = key ? FEATURE_SYNONYMS[key] : [w.slice(0, Math.max(4, w.length - 3))];
+          return alts.some((a) => t.includes(a));
+        });
+      });
+      if (hits.length) { fit = Math.min(100, fit + 5); it.featureHits = hits; }
     }
 
     // Trust: ratings pulled toward 4.0 when there are few reviews; eBay uses seller feedback

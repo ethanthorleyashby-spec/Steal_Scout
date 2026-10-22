@@ -43,20 +43,34 @@ export default async (req) => {
   const plan = parseQuery(q);
   if (!plan.searchText) return json(400, { error: "Add what you're shopping for, not just a price." });
 
-  const gParams = { engine: "google_shopping", q: plan.searchText, gl: "us", hl: "en" };
+  const query = plan.searchText || plan.coreQuery;
+  const gParams = { engine: "google_shopping", q: query, gl: "us", hl: "en" };
   if (plan.maxPrice != null) gParams.max_price = String(plan.maxPrice);
   if (plan.minPrice != null) gParams.min_price = String(plan.minPrice);
-  const eParams = { engine: "ebay", _nkw: plan.searchText, ebay_domain: "ebay.com" };
+  const eParams = { engine: "ebay", _nkw: query, ebay_domain: "ebay.com" };
   if (plan.maxPrice != null) eParams._udhi = String(plan.maxPrice);
   if (plan.minPrice != null) eParams._udlo = String(plan.minPrice);
   if (plan.condition === "new") eParams.LH_ItemCondition = "1000";
 
-  const [g, e] = await Promise.allSettled([serp(gParams, key), serp(eParams, key)]);
+  // If Google finds nothing for the full phrase, retry once with just the core product words
+  // (e.g. "round table") and no price filter; budget is still enforced by our own ranking.
+  const isEmpty = (err) => /hasn't returned any results|no results/i.test(err?.message || "");
+  const googleSearch = async () => {
+    try {
+      return await serp(gParams, key);
+    } catch (err) {
+      const short = plan.keywords.filter((w) => !/^\d+$/.test(w)).slice(-2).join(" ");
+      if (!isEmpty(err) || !short || short === query) throw err;
+      return await serp({ engine: "google_shopping", q: short, gl: "us", hl: "en" }, key);
+    }
+  };
+
+  const [g, e] = await Promise.allSettled([googleSearch(), serp(eParams, key)]);
   const google = g.status === "fulfilled" ? g.value : null;
   const ebay = e.status === "fulfilled" ? e.value : null;
   const warnings = [];
-  if (!google) warnings.push(`Store results unavailable: ${g.reason?.message || "unknown error"}`);
-  if (!ebay) warnings.push(`eBay results unavailable: ${e.reason?.message || "unknown error"}`);
+  if (!google) warnings.push(isEmpty(g.reason) ? "No store results for this search. Try fewer or simpler words." : `Store results unavailable: ${g.reason?.message || "unknown error"}`);
+  if (!ebay && !isEmpty(e.reason)) warnings.push(`eBay results unavailable: ${e.reason?.message || "unknown error"}`);
   if (!google && !ebay) return json(502, { error: "Couldn't reach the shopping sources. Try again in a minute.", warnings });
 
   const { items, removed: r1 } = normalize(google, ebay);
